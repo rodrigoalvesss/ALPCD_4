@@ -54,3 +54,45 @@ def top(n: int):
             exportar_csv(resultados, "top_ofertas.csv")
     else:
         print("Erro no pedido:", resp.status_code)
+
+
+@app.command()
+def search(localidade: str, empresa: str, n: int):
+    params = {
+        "api_key": API_KEY,
+        "limit": 100,
+        "q": f"{empresa} {localidade}"
+    }
+
+    resp = requests.get(API_LIST_URL, headers=headers, params=params)
+    if resp.status_code == 200:
+        resultados = resp.json().get("results", [])
+
+        loc_lower = localidade.lower()
+        emp_lower = empresa.lower()
+
+        filtrados = []
+        for job in resultados:
+            locais = job.get("locations", [])
+            nome_emp = job.get("company", {}).get("name", "")
+            tipo = ((job.get("jobType") or {}).get("name", "")) or job.get("type", "")
+
+            tem_localidade = any(
+                loc_lower in loc.get("name", "").lower()
+                for loc in locais
+            )
+            tem_empresa = emp_lower in nome_emp.lower()
+            eh_part_time = "part" in tipo.lower() and "time" in tipo.lower()
+
+            if tem_localidade and tem_empresa and eh_part_time:
+                filtrados.append(job)
+
+        filtrados = filtrados[:n]
+
+        print(json.dumps(filtrados, indent=2, ensure_ascii=False))
+
+        if typer.confirm("Deseja exportar para CSV?") and filtrados:
+            nome = f"{empresa}_{localidade}_parttime.csv".replace(" ", "_")
+            exportar_csv(filtrados, nome)
+    else:
+        print("Erro no pedido:", resp.status_code)
