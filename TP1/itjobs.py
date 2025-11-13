@@ -35,3 +35,22 @@ def exportar_csv(ofertas, ficheiro):
             })
     print(f"CSV '{ficheiro}' criado com sucesso!")
 
+@app.command()
+def top(n: int):
+    """
+    a) Listar os N trabalhos mais recentes publicados no itjobs.pt.
+    """
+    params = {
+        "api_key": API_KEY,
+        "limit": n
+    }
+
+    resp = requests.get(API_LIST_URL, headers=headers, params=params)
+    if resp.status_code == 200:
+        resultados = resp.json().get("results", [])
+        print(json.dumps(resultados, indent=2, ensure_ascii=False))
+
+        if typer.confirm("Deseja exportar para CSV?"):
+            exportar_csv(resultados, "top_ofertas.csv")
+    else:
+        print("Erro no pedido:", resp.status_code)
