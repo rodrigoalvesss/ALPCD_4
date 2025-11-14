@@ -58,47 +58,6 @@ def top(n: int):
 
 @app.command()
 def search(localidade: str, empresa: str, n: int):
-    params = {
-        "api_key": API_KEY,
-        "limit": 100,
-        "q": f"{empresa} {localidade}"
-    }
-
-    resp = requests.get(API_LIST_URL, headers=headers, params=params)
-    if resp.status_code == 200:
-        resultados = resp.json().get("results", [])
-
-        loc_lower = localidade.lower()
-        emp_lower = empresa.lower()
-
-        filtrados = []
-        for job in resultados:
-            locais = job.get("locations", [])
-            nome_emp = job.get("company", {}).get("name", "")
-            tipo = ((job.get("jobType") or {}).get("name", "")) or job.get("type", "")
-
-            tem_localidade = any(
-                loc_lower in loc.get("name", "").lower()
-                for loc in locais
-            )
-            tem_empresa = emp_lower in nome_emp.lower()
-            eh_part_time = "part" in tipo.lower() and "time" in tipo.lower()
-
-            if tem_localidade and tem_empresa and eh_part_time:
-                filtrados.append(job)
-
-        filtrados = filtrados[:n]
-
-        print(json.dumps(filtrados, indent=2, ensure_ascii=False))
-
-        if typer.confirm("Deseja exportar para CSV?") and filtrados:
-            nome = f"{empresa}_{localidade}_parttime.csv".replace(" ", "_")
-            exportar_csv(filtrados, nome)
-    else:
-        print("Erro no pedido:", resp.status_code)
-
-@app.command()
-def search(localidade: str, empresa: str, n: int):
     """
     b) Listar trabalhos do tipo PART-TIME publicados por uma empresa numa localidade.
     Output em JSON. Opcionalmente exporta CSV.
@@ -181,6 +140,45 @@ def type(job_id: str):
         descricao = job.get("body", "")
         regime = detectar_regime(descricao)
         print(regime)
+    else:
+        print("Erro no pedido:", resp.status_code)
+
+    mostrar_menu()
+
+@app.command()
+def skills(data_inicial: str, data_final: str):
+    """
+    d) Contar ocorrência de skills nas descrições entre duas datas.
+    """
+    params = {
+        "api_key": API_KEY,
+        "published_after": data_inicial,
+        "published_before": data_final,
+        "limit": 100
+    }
+
+    resp = requests.get(API_LIST_URL, headers=headers, params=params)
+    if resp.status_code == 200:
+        resultados = resp.json().get("results", [])
+
+        lista_skills = ["python", "java", "javascript", "sql", "docker"]
+        contagens = {s: 0 for s in lista_skills}
+
+        for job in resultados:
+            texto = (job.get("title", "") + " " + job.get("body", "")).lower()
+            for s in lista_skills:
+                contagens[s] += len(re.findall(rf"\b{s}\b", texto))
+
+        ordenado = sorted(contagens.items(), key=lambda x: x[1], reverse=True)
+        print(json.dumps([{k: v} for k, v in ordenado if v > 0], indent=2, ensure_ascii=False))
+
+        if typer.confirm("Deseja exportar para CSV?"):
+            with open("skills_contagem.csv", "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["skill", "ocorrencias"])
+                for k, v in ordenado:
+                    writer.writerow([k, v])
+            print("CSV 'skills_contagem.csv' criado com sucesso!")
     else:
         print("Erro no pedido:", resp.status_code)
 
