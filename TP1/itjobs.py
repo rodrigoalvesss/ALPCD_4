@@ -96,3 +96,77 @@ def search(localidade: str, empresa: str, n: int):
             exportar_csv(filtrados, nome)
     else:
         print("Erro no pedido:", resp.status_code)
+
+@app.command()
+def search(localidade: str, empresa: str, n: int):
+    """
+    b) Listar trabalhos do tipo PART-TIME publicados por uma empresa numa localidade.
+    Output em JSON. Opcionalmente exporta CSV.
+    """
+    # Pedimos um lote grande e depois filtramos nós
+    params = {
+        "api_key": API_KEY,
+        "limit": 100,
+        "q": f"{empresa} {localidade}"
+    }
+
+    resp = requests.get(API_LIST_URL, headers=headers, params=params)
+    if resp.status_code != 200:
+        print("Erro no pedido:", resp.status_code)
+        mostrar_menu()
+        return
+
+    resultados = resp.json().get("results", [])
+
+    loc_lower = localidade.lower()
+    emp_lower = empresa.lower()
+
+    def is_part_time(job: dict) -> bool:
+        # 1) Preferir o campo estruturado 'types'
+        tipos = job.get("types", [])
+        if any(re.search(r"\bpart[- ]?time\b", t.get("name", ""), re.I) for t in tipos):
+            return True
+        # 2) Fallback: procurar no título/corpo
+        texto = (job.get("title", "") + " " + job.get("body", "")).lower()
+        return bool(re.search(r"\bpart[- ]?time\b", texto, re.I))
+
+    # Filtrar: localidade AND empresa AND part-time
+    filtrados = []
+    for job in resultados:
+        locais = job.get("locations", [])
+        nome_emp = job.get("company", {}).get("name", "")
+
+        tem_localidade = any(
+            loc_lower in loc.get("name", "").lower()
+            for loc in locais
+        )
+        tem_empresa = emp_lower in nome_emp.lower()
+
+        if tem_localidade and tem_empresa and is_part_time(job):
+            filtrados.append(job)
+
+    # Respeitar o n pedido
+    filtrados = filtrados[:n]
+
+    # Output JSON (como no enunciado)
+    print(json.dumps(filtrados, indent=2, ensure_ascii=False))
+
+    # CSV opcional
+    if filtrados and typer.confirm("Deseja exportar para CSV?"):
+        nome = f"{empresa}_{localidade}_parttime.csv".replace(" ", "_")
+        exportar_csv(filtrados, nome)
+
+    mostrar_menu()
+
+def mostrar_menu():
+    print("\nMENU")
+    print("------------------------------------------------------------")
+    print("Pode utilizar o programa com os seguintes comandos:\n")
+    print(">  python codigo_projAmbi.py top n")
+    print("   → Mostra os n empregos mais recentes.\n")
+    print(">  python codigo_projAmbi.py search <localidade> <empresa> <n>")
+    print("   → Lista n trabalhos dessa empresa nessa localidade.\n")
+    print(">  python codigo_projAmbi.py type <job_id>")
+    print("   → Mostra o regime de trabalho (remoto/híbrido/presencial/outro).\n")
+    print(">  python codigo_projAmbi.py skills <data_inicial> <data_final>")
+    print("   → Conta ocorrências de skills nas descrições nesse intervalo.\n")
