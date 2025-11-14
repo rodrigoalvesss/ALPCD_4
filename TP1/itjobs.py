@@ -5,13 +5,14 @@ import csv
 import re
 import sys
 from datetime import datetime
+from operator import itemgetter
+
 
 app = typer.Typer()
 
 API_LIST_URL = "https://api.itjobs.pt/job/list.json"
 API_GET_URL = "https://api.itjobs.pt/job/get.json"
 API_SEARCH_URL = "https://api.itjobs.pt/job/search.json"
-
 
 API_KEY = "d160d8c93e8e49486873b9f6f60d3822"
 
@@ -210,8 +211,9 @@ def skills(data_inicial: str, data_final: str):
         for s in skills:
             contagens[s] += len(re.findall(rf"\b{s}\b", texto))
 
-    ordenado = sorted(contagens.items(), key=lambda x: x[1], reverse=True)
-    resultado_json = [{k: v} for k, v in ordenado if v > 0]
+    ordenado = sorted(contagens.items(), key=itemgetter(1), reverse=True)
+    resultado_json = [{skill: count} for skill, count in ordenado if count > 0]
+
 
     print(json.dumps(resultado_json, indent=2, ensure_ascii=False))
     mostrar_comandos()
