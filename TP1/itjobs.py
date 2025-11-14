@@ -188,13 +188,13 @@ def mostrar_menu():
     print("\nMENU")
     print("------------------------------------------------------------")
     print("Pode utilizar o programa com os seguintes comandos:\n")
-    print(">  python itjobs.py top n")
+    print(">  python TP1/itjobs.py top n")
     print("   - Mostra os n empregos mais recentes.\n")
-    print(">  python itjobs.py search <Localidade> <empresa (entre "")> <n>")
+    print(">  python TP1/itjobs.py search <Localidade> <empresa (entre "")> <n>")
     print("   - Lista n trabalhos dessa empresa nessa localidade.\n")
-    print(">  python itjobs.py type <job_id>")
+    print(">  python TP1/itjobs.py type <job_id>")
     print("   - Mostra o regime de trabalho (remoto/híbrido/presencial/outro).\n")
-    print(">  python itjobs.py skills <data_inicial (YYYY-MM-DD)> <data_final (YYY-MM-DD)>")
+    print(">  python TP1/itjobs.py skills <data_inicial (YYYY-MM-DD)> <data_final (YYY-MM-DD)>")
     print("   - Conta ocorrências de skills nas descrições nesse intervalo.\n")
 
 
