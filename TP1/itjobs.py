@@ -54,6 +54,8 @@ def top(n: int):
             exportar_csv(resultados, "top_ofertas.csv")
     else:
         print("Erro no pedido:", resp.status_code)
+    
+    mostrar_menu()
 
 
 @app.command()
