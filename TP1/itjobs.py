@@ -196,3 +196,10 @@ def mostrar_menu():
     print("   → Mostra o regime de trabalho (remoto/híbrido/presencial/outro).\n")
     print(">  python itjobs.py skills <data_inicial> <data_final>")
     print("   → Conta ocorrências de skills nas descrições nesse intervalo.\n")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 1:
+        mostrar_menu()
+    else:
+        app()
