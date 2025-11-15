@@ -221,13 +221,13 @@ def skills(data_inicial: str, data_final: str):
 def mostrar_comandos():
     print("------------------------------------------------------------")
     print("Pode utilizar o programa com os seguintes comandos:\n")
-    print(">  python TP1/itjobs.py top n")
+    print(">  python jobscli.py top n")
     print("   - Mostra os n empregos mais recentes.\n")
-    print('>  python TP1/itjobs.py search <Localidade> "<Empresa>" <n>')
-    print("   - Lista n trabalhos dessa empresa nessa localidade.\n")
-    print(">  python TP1/itjobs.py type <job_id>")
+    print('>  python jobscli.py search <Localidade> "<Empresa>" <n>')
+    print("   - Lista n trabalhos part-time dessa empresa nessa localidade.\n")
+    print(">  python jobscli.py type <job_id>")
     print("   - Mostra o regime de trabalho (remoto/híbrido/presencial/outro).\n")
-    print(">  python TP1/itjobs.py skills <data_inicial (YYYY-MM-DD)> <data_final (YYYY-MM-DD)>")
+    print(">  python jobscli.py skills <data_inicial (YYYY-MM-DD)> <data_final (YYYY-MM-DD)>")
     print("   - Conta ocorrências de skills nas descrições nesse intervalo.\n")
 
 
