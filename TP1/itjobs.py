@@ -70,8 +70,6 @@ def search(localidade: str, empresa: str, n: int):
     """
     params = {
         "api_key": API_KEY,
-        "q": empresa,
-        "type": 2,
         "limit": 200
     }
 
