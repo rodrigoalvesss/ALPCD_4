@@ -7,7 +7,6 @@ import sys
 from datetime import datetime
 from operator import itemgetter
 
-
 app = typer.Typer()
 
 API_LIST_URL = "https://api.itjobs.pt/job/list.json"
@@ -20,8 +19,8 @@ headers = {
     "User-Agent": "Mozilla/5.0 (ALPCD CLI)"
 }
 
-def exportar_csv(ofertas, ficheiro):
-    """Exporta as ofertas para CSV com os campos pedidos no enunciado."""
+def exportar_csv(ofertas, ficheiro): #Exporta as ofertas para CSV com os campos pedidos no enunciado.
+
     with open(ficheiro, "w", newline="", encoding="utf-8") as csvfile:
         fieldnames = ["titulo", "empresa", "descricao", "data_publicacao", "salario", "localizacao"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -39,11 +38,16 @@ def exportar_csv(ofertas, ficheiro):
             })
     print(f"CSV '{ficheiro}' criado com sucesso!")
 
+#a) Listar os N trabalhos mais recentes publicados no itjobs.pt.
+
 @app.command()
 def top(n: int):
-    """
-    a) Listar os N trabalhos mais recentes publicados no itjobs.pt.
-    """
+
+    if n <= 0:
+            print("O número de ofertas tem de ser maior que 0.")
+            mostrar_comandos()
+            return
+    
     params = {
         "api_key": API_KEY,
         "limit": n
@@ -61,13 +65,16 @@ def top(n: int):
     
     mostrar_comandos()
 
+#b) Listar trabalhos do tipo PART-TIME publicados por uma empresa numa localidade.
 
 @app.command()
 def search(localidade: str, empresa: str, n: int):
-    """
-    b) Listar trabalhos do tipo PART-TIME publicados por uma empresa numa localidade.
-    Output em JSON. Opcionalmente exporta CSV.
-    """
+
+    if n <= 0:
+            print("O número de ofertas tem de ser maior que 0.")
+            mostrar_comandos()
+            return
+    
     params = {
         "api_key": API_KEY,
         "limit": 200
@@ -104,13 +111,16 @@ def search(localidade: str, empresa: str, n: int):
 
     filtrados = filtrados[:n]
 
-    print(json.dumps(filtrados, indent=2, ensure_ascii=False))
-
-    if filtrados and typer.confirm("Deseja exportar para CSV?"):
-        nome = f"{empresa}_{localidade}_parttime.csv".replace(" ", "_")
-        exportar_csv(filtrados, nome)
+    if not filtrados:
+        print("Não foram encontrados trabalhos PART-TIME para essa empresa/localidade.")
+    else:
+        print(json.dumps(filtrados, indent=2, ensure_ascii=False))
+        if typer.confirm("Deseja exportar para CSV?"):
+            nome = f"{empresa}_{localidade}_parttime.csv".replace(" ", "_")
+            exportar_csv(filtrados, nome)
 
     mostrar_comandos()
+
 
 def detectar_regime(texto: str) -> str:
     t = texto.lower()
@@ -122,11 +132,11 @@ def detectar_regime(texto: str) -> str:
         return "presencial"
     return "outro"
 
+#c) Extrair o regime de trabalho de um determinado job id.
+
 @app.command()
 def type(job_id: str):
-    """
-    c) Extrair o regime de trabalho de um determinado job id.
-    """
+
     params = {
         "api_key": API_KEY,
         "id": job_id
@@ -168,15 +178,20 @@ def type(job_id: str):
 
     mostrar_comandos()
 
+#d) Contar ocorrências de skills nas descrições entre duas datas (YYYY-MM-DD).
+
 @app.command()
 def skills(data_inicial: str, data_final: str):
-    """
-    d) Contar ocorrências de skills nas descrições entre duas datas (YYYY-MM-DD).
-    """
+
     try:
         di, df = map(datetime.fromisoformat, (data_inicial, data_final))
     except ValueError:
         print("Datas inválidas. Usa o formato YYYY-MM-DD.")
+        mostrar_comandos()
+        return
+
+    if di > df:
+        print("A data inicial tem de ser anterior ou igual à data final.")
         mostrar_comandos()
         return
 
@@ -189,8 +204,8 @@ def skills(data_inicial: str, data_final: str):
 
     resultados = resp.json().get("results", [])
 
-    skills = ["python", "java", "javascript", "sql", "docker"]
-    contagens = dict.fromkeys(skills, 0)
+    lista_skills = ["python", "java", "javascript", "sql", "docker"]
+    contagens = dict.fromkeys(lista_skills, 0)
 
     for job in resultados:
         pub_str = job.get("publishedAt", "")[:10]
@@ -206,16 +221,18 @@ def skills(data_inicial: str, data_final: str):
             continue
 
         texto = (job.get("title", "") + " " + job.get("body", "")).lower()
-        for s in skills:
+        for s in lista_skills:
             contagens[s] += len(re.findall(rf"\b{s}\b", texto))
 
     ordenado = sorted(contagens.items(), key=itemgetter(1), reverse=True)
     resultado_json = [{skill: count} for skill, count in ordenado if count > 0]
 
+    if not resultado_json:
+        print("Não foram encontradas ocorrências dessas skills nesse intervalo de datas.")
+    else:
+        print(json.dumps(resultado_json, indent=2, ensure_ascii=False))
 
-    print(json.dumps(resultado_json, indent=2, ensure_ascii=False))
     mostrar_comandos()
-
 
 
 def mostrar_comandos():
@@ -229,7 +246,6 @@ def mostrar_comandos():
     print("   - Mostra o regime de trabalho (remoto/híbrido/presencial/outro).\n")
     print(">  python jobscli.py skills <data_inicial (YYYY-MM-DD)> <data_final (YYYY-MM-DD)>")
     print("   - Conta ocorrências de skills nas descrições nesse intervalo.\n")
-
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
