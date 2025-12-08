@@ -46,6 +46,8 @@ def exportar_csv(ofertas, ficheiro): #Exporta as ofertas para CSV com os campos 
             })
     print(f"CSV '{ficheiro}' criado com sucesso!")
 
+### TP1 ###
+
 #a) Listar os N trabalhos mais recentes publicados no itjobs.pt.
 
 @app.command()
@@ -241,6 +243,125 @@ def skills(data_inicial: str, data_final: str):
         print(json.dumps(resultado_json, indent=2, ensure_ascii=False))
 
     mostrar_comandos()
+
+
+### TP2 ###
+
+#a) Procurar a empresa na página de ranking do Teamlyzer e devolver o URL da empresa.
+
+def encontrar_url_empresa_teamlyzer(nome_empresa: str):
+
+    try:
+        resp = requests.get(TEAMLYZER_RANKING_URL, headers=TEAMLYZER_HEADERS, timeout=10)
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"Não foi possível aceder ao ranking do Teamlyzer: {e}")
+        return None
+
+    # Podes usar "html.parser" se não quiseres depender de lxml
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    # normalizar: tirar pontuação e pôr em minúsculas
+    alvo = re.sub(r"[^\w\s]", "", nome_empresa).strip().lower()
+
+    for link in soup.find_all("a", href=True):
+        href = link["href"]
+
+        # interessam só links para empresas
+        if "/companies/" not in href:
+            continue
+        if href == "/companies/ranking":
+            continue
+
+        texto_link = link.get_text(strip=True)
+        texto_norm = re.sub(r"[^\w\s]", "", texto_link).lower()
+
+        # match flexível
+        if alvo in texto_norm or texto_norm in alvo:
+            if href.startswith("http"):
+                return href
+            return TEAMLYZER_BASE_URL + href
+
+    return None
+
+# Extrair informações da página da empresa no Teamlyzer (rating, descrição, benefícios, salário).
+
+def extrair_info_empresa_teamlyzer(url_empresa: str):
+
+    try:
+        resp = requests.get(url_empresa, headers=TEAMLYZER_HEADERS, timeout=10)
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"Erro ao aceder à página da empresa no Teamlyzer: {e}")
+        return {
+            "teamlyzer_rating": None,
+            "teamlyzer_description": None,
+            "teamlyzer_benefits": None,
+            "teamlyzer_salary": None,
+        }
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    # RATING
+
+    rating = None
+    candidato = soup.find(string=re.compile(r"\b\d+[.,]\d+\s*/\s*5\b"))
+    if candidato:
+        m = re.search(r"(\d+[.,]\d+)", candidato)
+        if m:
+            try:
+                rating = float(m.group(1).replace(",", "."))
+            except ValueError:
+                rating = None
+
+    # DESCRIÇÃO 
+
+    description = None
+    meta_desc = soup.find("meta", {"name": "description"})
+    if meta_desc and meta_desc.get("content"):
+        description = meta_desc["content"].strip()
+    else:
+        for p in soup.find_all("p"):
+            texto = p.get_text(" ", strip=True)
+            if len(texto) > 40:
+                description = texto
+                break
+
+    # BENEFÍCIOS
+
+    benefits = None
+    bloco_benef = None
+    for h in soup.find_all(["h2", "h3", "h4"]):
+        if "benef" in h.get_text(strip=True).lower():
+            bloco_benef = h.find_next("ul")
+            break
+
+    if bloco_benef:
+        itens = [li.get_text(" ", strip=True) for li in bloco_benef.find_all("li")]
+        if itens:
+            benefits = "; ".join(itens[:5])
+
+    # SALÁRIO
+    salary = None
+    for node in soup.find_all(string=True):
+        texto = node.strip()
+        if not texto or len(texto) > 200:
+            continue
+
+        if re.search(r"(salári|salary|€|\$)", texto, re.IGNORECASE):
+            salary = texto
+            break
+
+    return {
+        "teamlyzer_rating": rating,
+        "teamlyzer_description": description,
+        "teamlyzer_benefits": benefits,
+        "teamlyzer_salary": salary,
+    }
+
+
+
+
 
 
 def mostrar_comandos():
