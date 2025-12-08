@@ -6,6 +6,7 @@ import re
 import sys
 from datetime import datetime
 from operator import itemgetter
+from bs4 import BeautifulSoup
 
 app = typer.Typer()
 
@@ -18,6 +19,13 @@ API_KEY = "d160d8c93e8e49486873b9f6f60d3822"
 headers = {
     "User-Agent": "Mozilla/5.0 (ALPCD CLI)"
 }
+
+TEAMLYZER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; TeamlyzerScraper/1.0)"
+}
+
+TEAMLYZER_RANKING_URL = "https://pt.teamlyzer.com/companies/ranking"
+TEAMLYZER_BASE_URL = "https://pt.teamlyzer.com"
 
 def exportar_csv(ofertas, ficheiro): #Exporta as ofertas para CSV com os campos pedidos no enunciado.
 
