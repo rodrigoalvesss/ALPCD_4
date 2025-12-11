@@ -245,13 +245,13 @@ def skills(data_inicial: str, data_final: str):
 
     mostrar_comandos()
 
-
 ### TP2 ###
 
-#a) Procurar a empresa na página de ranking do Teamlyzer e devolver o URL da empresa.
-
-def encontrar_url_empresa_teamlyzer(nome_empresa: str):
-
+def encontrar_url_empresa_teamlyzer(nome_empresa: str) -> Optional[str]:
+    """
+    Procura a empresa na página de ranking do Teamlyzer
+    e devolve o URL da página da empresa (ou None).
+    """
     try:
         resp = requests.get(TEAMLYZER_RANKING_URL, headers=TEAMLYZER_HEADERS, timeout=10)
         resp.raise_for_status()
@@ -260,44 +260,24 @@ def encontrar_url_empresa_teamlyzer(nome_empresa: str):
         return None
 
     soup = BeautifulSoup(resp.text, "html.parser")
-
-    # normalizar: tirar pontuação e pôr em minúsculas
-    alvo = re.sub(r"[^\w\s]", " ", nome_empresa).strip().lower()
-    palavras_alvo = [p for p in alvo.split() if p]
-    alvo_join = " ".join(palavras_alvo)
-
-    if not palavras_alvo:
-        return None
+    alvo = nome_empresa.strip().lower()
 
     for link in soup.find_all("a", href=True):
-        href = link["href"].strip()
-
-        # interessam só links para empresas
-        if not href.startswith("/companies/"):
+        href = link["href"]
+        if not href.startswith("/companies/") or href == "/companies/ranking":
             continue
-        if href == "/companies/ranking":
-            continue
-
-        texto_link = link.get_text(strip=True)
-        texto_norm = re.sub(r"[^\w\s]", " ", texto_link).lower()
-        palavras_link = set(p for p in texto_norm.split() if p)
-        texto_norm_join = " ".join(texto_norm.split())
-
-        # critério mais flexível:
-        #   - ou todas as palavras aparecem
-        #   - ou o nome completo (normalizado) é substring do texto do link
-        if all(p in palavras_link for p in palavras_alvo) or (alvo_join and alvo_join in texto_norm_join):
-            if href.startswith("http"):
-                return href
+        texto = link.get_text(strip=True).lower()
+        if alvo and alvo in texto:
             return TEAMLYZER_BASE_URL + href
 
     return None
 
 
-# Extrair informações da página da empresa no Teamlyzer (rating, descrição, benefícios, salário).
-
-def extrair_info_empresa_teamlyzer(url_empresa: str):
-
+def extrair_info_empresa_teamlyzer(url_empresa: str) -> dict:
+    """
+    Vai à página da empresa no Teamlyzer e tenta extrair:
+    rating, descrição, benefícios e uma frase sobre salário.
+    """
     try:
         resp = requests.get(url_empresa, headers=TEAMLYZER_HEADERS, timeout=10)
         resp.raise_for_status()
@@ -312,55 +292,48 @@ def extrair_info_empresa_teamlyzer(url_empresa: str):
 
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # RATING
-
+    # RATING (ex: "4.2 / 5")
     rating = None
-    candidato = soup.find(string=re.compile(r"\b\d+[.,]\d+\s*/\s*5\b"))
-    if candidato:
-        m = re.search(r"(\d+[.,]\d+)", candidato)
+    txt_rating = soup.find(string=re.compile(r"\b\d+[.,]\d+\s*/\s*5\b"))
+    if txt_rating:
+        m = re.search(r"(\d+[.,]\d+)", txt_rating)
         if m:
             try:
                 rating = float(m.group(1).replace(",", "."))
             except ValueError:
                 rating = None
 
-    # DESCRIÇÃO 
-
+    # DESCRIÇÃO (meta description ou primeiro <p> razoável)
     description = None
-    meta_desc = soup.find("meta", {"name": "description"})
-    if meta_desc and meta_desc.get("content"):
-        description = meta_desc["content"].strip()
+    meta = soup.find("meta", {"name": "description"})
+    if meta and meta.get("content"):
+        description = meta["content"].strip()
     else:
         for p in soup.find_all("p"):
-            texto = p.get_text(" ", strip=True)
-            if len(texto) > 40:
-                description = texto
+            t = p.get_text(" ", strip=True)
+            if len(t) > 40:
+                description = t
                 break
 
-    # BENEFÍCIOS
-
+    # BENEFÍCIOS (lista depois de um título com "benef")
     benefits = None
-    bloco_benef = None
     for h in soup.find_all(["h2", "h3", "h4"]):
         if "benef" in h.get_text(strip=True).lower():
-            bloco_benef = h.find_next("ul")
+            ul = h.find_next("ul")
+            if ul:
+                itens = [li.get_text(" ", strip=True) for li in ul.find_all("li")]
+                if itens:
+                    benefits = "; ".join(itens)
             break
 
-    if bloco_benef:
-        itens = [li.get_text(" ", strip=True) for li in bloco_benef.find_all("li")]
-        if itens:
-            benefits = "; ".join(itens[:5])
-
-    # SALÁRIO
-
+    # SALÁRIO (primeira frase que mencione salário ou símbolo € / $)
     salary = None
     for node in soup.find_all(string=True):
-        texto = node.strip()
-        if not texto or len(texto) > 200:
+        t = node.strip()
+        if not t or len(t) > 200:
             continue
-
-        if re.search(r"(salári|salary|€|\$)", texto, re.IGNORECASE):
-            salary = texto
+        if re.search(r"(salári|salary|€|\$)", t, re.IGNORECASE):
+            salary = t
             break
 
     return {
@@ -370,26 +343,6 @@ def extrair_info_empresa_teamlyzer(url_empresa: str):
         "teamlyzer_salary": salary,
     }
 
-# Tentar construir diretamente o URL da empresa no Teamlyzer a partir do slug do itjobs.pt.
-
-def construir_url_empresa_por_slug(slug: str):
-
-    if not slug:
-        return None
-
-    url = f"{TEAMLYZER_BASE_URL}/companies/{slug}"
-
-    try:
-        resp = requests.get(url, headers=TEAMLYZER_HEADERS, timeout=10)
-        if resp.status_code == 200:
-            return url
-    except Exception as e:
-        print(f"Erro ao testar URL da empresa por slug: {e}")
-
-    return None
-
-
-# Obter informações de um job específico e adicionar dados da empresa vindos do Teamlyzer.
 
 @app.command()
 def get(
@@ -400,13 +353,14 @@ def get(
         help="Se indicado, exporta os dados do job enriquecido para um ficheiro CSV."
     )
 ):
-
-    params = {
-        "api_key": API_KEY,
-        "id": job_id
-    }
-
+    """
+    TP2 (a): dado um job_id, obtém o job no itjobs.pt,
+    procura a empresa no Teamlyzer e junta rating/descrição/
+    benefícios/salário ao JSON do job. (TP2 d: CSV opcional)
+    """
+    params = {"api_key": API_KEY, "id": job_id}
     resp = requests.get(API_GET_URL, headers=headers, params=params)
+
     if resp.status_code != 200:
         print("Erro no pedido à API do itjobs.pt:", resp.status_code)
         mostrar_comandos()
@@ -414,21 +368,18 @@ def get(
 
     job = resp.json()
 
-    # Verificar erro da API
     if isinstance(job, dict) and "error" in job:
         print("Erro da API itjobs.pt:", job["error"].get("message", "Erro desconhecido"))
         mostrar_comandos()
         return
 
-    # Tentar obter o nome e o slug da empresa
+    # nome da empresa
     company = job.get("company")
     if isinstance(company, dict):
         nome_empresa = company.get("name")
-        slug_empresa = company.get("slug")
         nome_empresa_str = nome_empresa or "N/A"
     else:
         nome_empresa = str(company) if company else None
-        slug_empresa = None
         nome_empresa_str = nome_empresa or "N/A"
 
     if not nome_empresa:
@@ -437,34 +388,22 @@ def get(
         mostrar_comandos()
         return
 
-    # Procurar URL da empresa no Teamlyzer:
-    # 1) tentar diretamente pelo slug
-    # 2) se falhar, procurar no ranking pelo nome
-    url_empresa = None
-
-    if slug_empresa:
-        url_empresa = construir_url_empresa_por_slug(slug_empresa)
-
-    if not url_empresa:
-        url_empresa = encontrar_url_empresa_teamlyzer(nome_empresa)
-
+    # URL no Teamlyzer
+    url_empresa = encontrar_url_empresa_teamlyzer(nome_empresa)
     if not url_empresa:
         print(f"Empresa '{nome_empresa}' não encontrada no Teamlyzer.")
-        # Mesmo assim mostramos o job original
         print(json.dumps(job, indent=2, ensure_ascii=False))
         mostrar_comandos()
         return
 
-    # Extrair informações da empresa a partir do Teamlyzer
+    # Enriquecer com dados do Teamlyzer
     info_teamlyzer = extrair_info_empresa_teamlyzer(url_empresa)
-
-    # Adicionar os novos campos ao objeto do job
     job.update(info_teamlyzer)
 
-    # Imprimir JSON final no terminal
+    # Mostrar JSON final
     print(json.dumps(job, indent=2, ensure_ascii=False))
 
-    # Exportar para CSV se o utilizador indicou um ficheiro
+    # CSV opcional (alínea d para o comando get)
     if csv_file:
         try:
             with open(csv_file, "w", newline="", encoding="utf-8") as f:
@@ -506,8 +445,10 @@ def mostrar_comandos():
     print("   - Mostra o regime de trabalho (remoto/híbrido/presencial/outro).\n")
     print(">  python jobscli.py skills <data_inicial (YYYY-MM-DD)> <data_final (YYYY-MM-DD)>")
     print("   - Conta ocorrências de skills nas descrições nesse intervalo.\n")
-    print(">  python jobscli.py get <job_id>")
-    print("   - Mostra os detalhes do job enriquecidos com dados do Teamlyzer.\n")
+    print(">  python jobscli.py get <job_id> [--csv ficheiro.csv]")
+    print("   - Mostra os detalhes do job enriquecidos com dados do Teamlyzer.")
+    print("   - Se indicar --csv, guarda também um ficheiro CSV com campos principais.\n")
+
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
