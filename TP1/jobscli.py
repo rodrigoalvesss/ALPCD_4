@@ -246,7 +246,7 @@ def skills(data_inicial: str, data_final: str):
     mostrar_comandos()
 
 ### TP2 ###
-
+#a)
 def encontrar_url_empresa_teamlyzer(nome_empresa: str) -> Optional[str]:
     """
     Procura a empresa na página de ranking do Teamlyzer
@@ -434,6 +434,66 @@ def get(
     mostrar_comandos()
 
 
+# -------------------------
+# TP2 — alínea b
+# -------------------------
+
+@app.command()
+def statistics(
+    zone: str = typer.Argument(..., help="Zona/Região a analisar"),
+    csv_file: Optional[str] = typer.Option(None, "--csv", help="Exportar para CSV")
+):
+    """
+    Conta vagas por zona e por tipo de trabalho.
+    Exporta CSV: Zona | Tipo de Trabalho | Nº de vagas.
+    """
+
+    params = {"api_key": API_KEY, "limit": 200}
+    resp = requests.get(API_LIST_URL, headers=headers, params=params)
+
+    if resp.status_code != 200:
+        print("Erro no pedido:", resp.status_code)
+        mostrar_comandos()
+        return
+
+    resultados = resp.json().get("results", [])
+    zona_norm = zone.lower()
+
+    contagens = {}   # {(zona, tipo): nº vagas}
+
+    for job in resultados:
+        titulo = job.get("title", "N/A")
+
+        for loc in job.get("locations", []):
+            nome_loc = loc.get("name", "").lower()
+
+            if zona_norm in nome_loc:
+                chave = (loc.get("name", "N/A"), titulo)
+                contagens[chave] = contagens.get(chave, 0) + 1
+
+    # Criar JSON para mostrar ao utilizador
+    resultado = [
+        {"zona": zona, "tipo_trabalho": tipo, "vagas": count}
+        for (zona, tipo), count in contagens.items()
+    ]
+
+    print(json.dumps(resultado, indent=2, ensure_ascii=False))
+
+    # Exportar para CSV
+    if csv_file:
+        try:
+            with open(csv_file, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Zona", "Tipo de Trabalho", "Nº de vagas"])
+                for (zona, tipo), count in contagens.items():
+                    writer.writerow([zona, tipo, count])
+            print(f"CSV '{csv_file}' criado com sucesso!")
+        except Exception as e:
+            print("Erro ao criar CSV:", e)
+
+    mostrar_comandos()
+
+
 def mostrar_comandos():
     print("------------------------------------------------------------")
     print("Pode utilizar o programa com os seguintes comandos:\n")
@@ -445,6 +505,8 @@ def mostrar_comandos():
     print("   - Mostra o regime de trabalho (remoto/híbrido/presencial/outro).\n")
     print(">  python jobscli.py skills <data_inicial (YYYY-MM-DD)> <data_final (YYYY-MM-DD)>")
     print("   - Conta ocorrências de skills nas descrições nesse intervalo.\n")
+    print(">  python jobscli.py statistics <Zona> [--csv ficheiro.csv]")
+    print("   - Conta vagas por zona e por tipo de trabalho.\n")
     print(">  python jobscli.py get <job_id> [--csv ficheiro.csv]")
     print("   - Mostra os detalhes do job enriquecidos com dados do Teamlyzer.")
     print("   - Se indicar --csv, guarda também um ficheiro CSV com campos principais.\n")
