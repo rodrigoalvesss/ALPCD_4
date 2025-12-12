@@ -8,6 +8,11 @@ from datetime import datetime
 from operator import itemgetter
 from bs4 import BeautifulSoup
 from typing import Optional
+from urllib.parse import quote
+import unicodedata
+from collections import Counter
+
+
 
 app = typer.Typer()
 
@@ -127,7 +132,7 @@ def search(localidade: str, empresa: str, n: int):
     else:
         print(json.dumps(filtrados, indent=2, ensure_ascii=False))
         if typer.confirm("Deseja exportar para CSV?"):
-            nome = f"{empresa}_{localidade}_parttime.csv".replace(" ", "_")
+            nome = f"{empresa}{localidade}_parttime.csv".replace(" ", "")
             exportar_csv(filtrados, nome)
 
     mostrar_comandos()
@@ -246,12 +251,30 @@ def skills(data_inicial: str, data_final: str):
     mostrar_comandos()
 
 ### TP2 ###
-#a)
-def encontrar_url_empresa_teamlyzer(nome_empresa: str) -> Optional[str]:
+
+#a)     Procura a empresa na página de ranking do Teamlyzer e devolve o URL da página da empresa (ou None).
+
+def encontrar_url_empresa_teamlyzer(nome_empresa: str, slug: Optional[str] = None) -> Optional[str]:
     """
-    Procura a empresa na página de ranking do Teamlyzer
-    e devolve o URL da página da empresa (ou None).
+    Tenta encontrar o URL da empresa no Teamlyzer.
+
+    1) Primeiro tenta construir diretamente a partir do slug do itjobs.pt:
+       https://pt.teamlyzer.com/companies/<slug>
+    2) Se não der, faz fallback para o ranking, procurando links de /companies/...
     """
+
+    # 1) Tentar com o slug, se existir
+    if slug:
+        candidate_url = f"{TEAMLYZER_BASE_URL}/companies/{slug}"
+        try:
+            resp = requests.get(candidate_url, headers=TEAMLYZER_HEADERS, timeout=10)
+            if resp.status_code == 200:
+                return candidate_url
+        except Exception:
+            # se falhar, continua para o ranking
+            pass
+
+    # 2) Fallback: ranking
     try:
         resp = requests.get(TEAMLYZER_RANKING_URL, headers=TEAMLYZER_HEADERS, timeout=10)
         resp.raise_for_status()
@@ -260,24 +283,28 @@ def encontrar_url_empresa_teamlyzer(nome_empresa: str) -> Optional[str]:
         return None
 
     soup = BeautifulSoup(resp.text, "html.parser")
-    alvo = nome_empresa.strip().lower()
+    alvo = (nome_empresa or "").strip().lower()
+    slug_norm = (slug or "").lower()
 
     for link in soup.find_all("a", href=True):
         href = link["href"]
         if not href.startswith("/companies/") or href == "/companies/ranking":
             continue
-        texto = link.get_text(strip=True).lower()
+
+        texto = link.get_text(" ", strip=True).lower()
+
+        # critério: ou o slug aparece no href, ou o nome aparece no texto
+        if slug_norm and slug_norm in href.lower():
+            return TEAMLYZER_BASE_URL + href
         if alvo and alvo in texto:
             return TEAMLYZER_BASE_URL + href
 
     return None
 
-
 def extrair_info_empresa_teamlyzer(url_empresa: str) -> dict:
-    """
-    Vai à página da empresa no Teamlyzer e tenta extrair:
-    rating, descrição, benefícios e uma frase sobre salário.
-    """
+
+#    Vai à página da empresa no Teamlyzer e tenta extrair: rating, descrição, benefícios e uma frase sobre salário.
+
     try:
         resp = requests.get(url_empresa, headers=TEAMLYZER_HEADERS, timeout=10)
         resp.raise_for_status()
@@ -292,7 +319,6 @@ def extrair_info_empresa_teamlyzer(url_empresa: str) -> dict:
 
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # RATING (ex: "4.2 / 5")
     rating = None
     txt_rating = soup.find(string=re.compile(r"\b\d+[.,]\d+\s*/\s*5\b"))
     if txt_rating:
@@ -303,7 +329,6 @@ def extrair_info_empresa_teamlyzer(url_empresa: str) -> dict:
             except ValueError:
                 rating = None
 
-    # DESCRIÇÃO (meta description ou primeiro <p> razoável)
     description = None
     meta = soup.find("meta", {"name": "description"})
     if meta and meta.get("content"):
@@ -315,7 +340,6 @@ def extrair_info_empresa_teamlyzer(url_empresa: str) -> dict:
                 description = t
                 break
 
-    # BENEFÍCIOS (lista depois de um título com "benef")
     benefits = None
     for h in soup.find_all(["h2", "h3", "h4"]):
         if "benef" in h.get_text(strip=True).lower():
@@ -343,7 +367,6 @@ def extrair_info_empresa_teamlyzer(url_empresa: str) -> dict:
         "teamlyzer_salary": salary,
     }
 
-
 @app.command()
 def get(
     job_id: int,
@@ -353,30 +376,31 @@ def get(
         help="Se indicado, exporta os dados do job enriquecido para um ficheiro CSV."
     )
 ):
-    """
-    TP2 (a): dado um job_id, obtém o job no itjobs.pt,
-    procura a empresa no Teamlyzer e junta rating/descrição/
-    benefícios/salário ao JSON do job. (TP2 d: CSV opcional)
-    """
+    
     params = {"api_key": API_KEY, "id": job_id}
-    resp = requests.get(API_GET_URL, headers=headers, params=params)
-
-    if resp.status_code != 200:
-        print("Erro no pedido à API do itjobs.pt:", resp.status_code)
+    try:
+        resp = requests.get(API_GET_URL, headers=headers, params=params, timeout=10)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Erro ao aceder à API do itjobs.pt: {e}")
         mostrar_comandos()
         return
 
     job = resp.json()
+
 
     if isinstance(job, dict) and "error" in job:
         print("Erro da API itjobs.pt:", job["error"].get("message", "Erro desconhecido"))
         mostrar_comandos()
         return
 
-    # nome da empresa
+    # nome da empresa + slug (se existir)
     company = job.get("company")
+    slug_empresa = None
+
     if isinstance(company, dict):
         nome_empresa = company.get("name")
+        slug_empresa = company.get("slug")
         nome_empresa_str = nome_empresa or "N/A"
     else:
         nome_empresa = str(company) if company else None
@@ -388,19 +412,23 @@ def get(
         mostrar_comandos()
         return
 
-    # URL no Teamlyzer
-    url_empresa = encontrar_url_empresa_teamlyzer(nome_empresa)
+    # aqui já passamos também o slug para aumentar a probabilidade de encontrar a empresa
+    url_empresa = encontrar_url_empresa_teamlyzer(nome_empresa, slug_empresa)
     if not url_empresa:
-        print(f"Empresa '{nome_empresa}' não encontrada no Teamlyzer.")
+        print(f"Empresa '{nome_empresa}' não encontrada no Teamlyzer. JSON original do job:")
         print(json.dumps(job, indent=2, ensure_ascii=False))
         mostrar_comandos()
         return
 
-    # Enriquecer com dados do Teamlyzer
+    if not url_empresa:
+        print(f"Empresa '{nome_empresa}' não encontrada no Teamlyzer. JSON original do job:")
+        print(json.dumps(job, indent=2, ensure_ascii=False))
+        mostrar_comandos()
+        return
+
     info_teamlyzer = extrair_info_empresa_teamlyzer(url_empresa)
     job.update(info_teamlyzer)
 
-    # Mostrar JSON final
     print(json.dumps(job, indent=2, ensure_ascii=False))
 
     # CSV opcional (alínea d para o comando get)
@@ -411,6 +439,7 @@ def get(
                     "id",
                     "title",
                     "company",
+                    "teamlyzer_url",
                     "teamlyzer_rating",
                     "teamlyzer_description",
                     "teamlyzer_benefits",
@@ -422,6 +451,7 @@ def get(
                     "id": job.get("id", "N/A"),
                     "title": job.get("title", "N/A"),
                     "company": nome_empresa_str,
+                    "teamlyzer_url": url_empresa,
                     "teamlyzer_rating": job.get("teamlyzer_rating"),
                     "teamlyzer_description": job.get("teamlyzer_description"),
                     "teamlyzer_benefits": job.get("teamlyzer_benefits"),
@@ -431,35 +461,32 @@ def get(
         except Exception as e:
             print(f"Erro ao criar CSV '{csv_file}': {e}")
 
+
     mostrar_comandos()
 
 
-# -------------------------
-# TP2 — alínea b
-# -------------------------
+#b)     Conta vagas por zona e por tipo de trabalho. Pode ainda exportar CSV: Zona | Tipo de Trabalho | Nº de vagas.
 
 @app.command()
 def statistics(
     zone: str = typer.Argument(..., help="Zona/Região a analisar"),
     csv_file: Optional[str] = typer.Option(None, "--csv", help="Exportar para CSV")
 ):
-    """
-    Conta vagas por zona e por tipo de trabalho.
-    Exporta CSV: Zona | Tipo de Trabalho | Nº de vagas.
-    """
 
     params = {"api_key": API_KEY, "limit": 200}
-    resp = requests.get(API_LIST_URL, headers=headers, params=params)
-
-    if resp.status_code != 200:
-        print("Erro no pedido:", resp.status_code)
+    try:
+        resp = requests.get(API_LIST_URL, headers=headers, params=params, timeout=10)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Erro ao aceder à API do itjobs.pt: {e}")
         mostrar_comandos()
         return
 
     resultados = resp.json().get("results", [])
+
     zona_norm = zone.lower()
 
-    contagens = {}   # {(zona, tipo): nº vagas}
+    contagens = {}
 
     for job in resultados:
         titulo = job.get("title", "N/A")
@@ -471,7 +498,6 @@ def statistics(
                 chave = (loc.get("name", "N/A"), titulo)
                 contagens[chave] = contagens.get(chave, 0) + 1
 
-    # Criar JSON para mostrar ao utilizador
     resultado = [
         {"zona": zona, "tipo_trabalho": tipo, "vagas": count}
         for (zona, tipo), count in contagens.items()
@@ -479,136 +505,208 @@ def statistics(
 
     print(json.dumps(resultado, indent=2, ensure_ascii=False))
 
-    # Exportar para CSV
-    if csv_file:
-        try:
-            with open(csv_file, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(["Zona", "Tipo de Trabalho", "Nº de vagas"])
-                for (zona, tipo), count in contagens.items():
-                    writer.writerow([zona, tipo, count])
-            print(f"CSV '{csv_file}' criado com sucesso!")
-        except Exception as e:
-            print("Erro ao criar CSV:", e)
 
     mostrar_comandos()
 
-from difflib import get_close_matches
+#c
 
-@app.command()
-def list_skills(job: str, csv_file: Optional[str] = typer.Option(None, "--csv")):
-    """
-    TP1 (c)+(d): Obtém as top skills pedidas para um cargo qualquer.
-    Funciona para qualquer texto: 'data scientist', 'backend engineer', etc.
-    """
+# =============================
+# TP2 — ALÍNEA c) (corrigida)
+# =============================
 
-    print(f"A procurar skills para '{job}' ...")
+def normalizar_texto(s: str) -> str:
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    s = s.lower().strip()
+    s = re.sub(r"\s+", " ", s)
+    return s
 
-    # --------------------------------------------------
-    # 1) Recolher TODAS as tags reais do Teamlyzer
-    # --------------------------------------------------
-    base_url = "https://pt.teamlyzer.com/companies/jobs"
 
-    try:
-        resp = requests.get(base_url, headers=TEAMLYZER_HEADERS, timeout=10)
-        resp.raise_for_status()
-    except Exception as e:
-        print("Erro ao aceder ao Teamlyzer:", e)
-        return
+def obter_html(url: str) -> str:
+    resp = requests.get(
+        url,
+        headers={
+            **TEAMLYZER_HEADERS,
+            "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8",
+            "Referer": TEAMLYZER_BASE_URL + "/",
+        },
+        timeout=20,
+    )
+    resp.raise_for_status()
+    return resp.text
 
-    soup = BeautifulSoup(resp.text, "html.parser")
 
-    all_tags = set()
-    for a in soup.find_all("a", href=True):
-        href = a["href"]
-        if "tags=" in href:
-            tag = href.split("tags=")[-1].split("&")[0].strip().lower()
-            all_tags.add(tag)
+def _extrair_options_do_select(soup: BeautifulSoup, keywords: list[str]) -> list[tuple[str, str]]:
+    selects = []
+    for sel in soup.find_all("select"):
+        blob = " ".join([
+            sel.get("id", "") or "",
+            sel.get("name", "") or "",
+            " ".join(sel.get("class", []) if isinstance(sel.get("class"), list) else []),
+        ]).lower()
 
-    if not all_tags:
-        print("Não foi possível obter tags do Teamlyzer.")
-        return
+        if any(k in blob for k in keywords):
+            selects.append(sel)
 
-    # --------------------------------------------------
-    # 2) Fuzzy-match entre cargo e tags reais
-    # --------------------------------------------------
-    termo = job.lower().replace(" ", "-")
-    candidate_tags = get_close_matches(termo, list(all_tags), n=5, cutoff=0.3)
+    opts = []
+    for sel in selects:
+        for opt in sel.find_all("option"):
+            val = (opt.get("value") or "").strip()
+            txt = opt.get_text(" ", strip=True).strip()
+            if val and txt:
+                opts.append((txt, val))
+    return opts
 
-    if not candidate_tags:
-        print("Nenhuma tag compatível encontrada para este cargo.")
-        return
 
-    print(f"Tags detetadas para '{job}': {candidate_tags}")
+def resolver_profession_role(job: str) -> Optional[str]:
+    url = f"{TEAMLYZER_BASE_URL}/companies/jobs?order=most_relevant"
+    html = obter_html(url)
+    soup = BeautifulSoup(html, "html.parser")
 
-    # --------------------------------------------------
-    # 3) Ir buscar vagas de cada tag relevante
-    # --------------------------------------------------
+    cargos = _extrair_options_do_select(
+        soup,
+        keywords=["profession_role"]
+    )
+
+    if not cargos:
+        return None
+
+    alvo = normalizar_texto(job)
+
+    best_val = None
+    best_score = 0
+
+    for txt, val in cargos:
+        t = normalizar_texto(txt)
+        v = normalizar_texto(val)
+
+        t_clean = re.sub(r"\s*\(\d+\)\s*", "", t).strip()
+
+        score = 0
+        if alvo == t_clean:
+            score = 100
+        elif alvo in t_clean:
+            score = 80
+        elif t_clean in alvo:
+            score = 60
+
+        # extra: match por slug/value (muito útil)
+        if alvo.replace(" ", "-") in v:
+            score = max(score, 90)
+
+        if score > best_score:
+            best_score = score
+            best_val = val
+
+
+    return best_val if best_score > 0 else None
+
+
+def obter_top10_skills(job: str, top: int = 10) -> list[dict]:
+
+    # 1) Resolver o cargo para o value do profession_role
+    profession_role = resolver_profession_role(job)
+    if not profession_role:
+        return []
+
+    # 2) Abrir página já filtrada pelo cargo
+    url = (
+        f"{TEAMLYZER_BASE_URL}/companies/jobs"
+        f"?profession_role={quote(profession_role)}&order=most_relevant"
+    )
+    html = obter_html(url)
+    soup = BeautifulSoup(html, "html.parser")
+
+    # 3) Extrair apenas o select correto de stack/tags
+    tags = _extrair_options_do_select(
+        soup,
+        keywords=["stack", "tag"]
+    )
+
     contagens = {}
 
-    for tag in candidate_tags:
-        url = f"https://pt.teamlyzer.com/companies/jobs?tags={tag}&order=most_relevant"
-
-        try:
-            resp2 = requests.get(url, headers=TEAMLYZER_HEADERS, timeout=10)
-            resp2.raise_for_status()
-        except:
+    for txt, val in tags:
+        # Esperamos texto do tipo "python (49)"
+        m = re.search(r"\((\d+)\)", txt)
+        if not m:
             continue
 
-        soup2 = BeautifulSoup(resp2.text, "html.parser")
+        count = int(m.group(1))
+        if count <= 0:
+            continue
 
-        # Skills de cada vaga (HTML direto)
-        tags_html = soup2.find_all("a", class_="job-tag")
-        for t in tags_html:
-            skill = t.get_text(strip=True).lower()
-            contagens[skill] = contagens.get(skill, 0) + 1
+        # Preferir o value (slug) quando existe
+        skill = normalizar_texto(val) or normalizar_texto(txt)
+        skill = re.sub(r"\s*\(\d+\)\s*", "", skill).strip()
 
-    if not contagens:
-        print("Não foram encontradas skills para este cargo.")
+        # Filtros de segurança
+        if not skill:
+            continue
+        if skill in {"all", "todos", "todas"}:
+            continue
+
+        # Garantir que não duplica com valores menores
+        contagens[skill] = max(contagens.get(skill, 0), count)
+
+    resultado = [
+        {"skill": skill, "count": count}
+        for skill, count in contagens.items()
+    ]
+    resultado.sort(key=lambda x: x["count"], reverse=True)
+
+    return resultado[:top]
+
+
+@app.command("list-skills")
+def list_skills(
+    job: str = typer.Argument(..., help='Ex: "data scientist"'),
+    top: int = typer.Option(10, "--top", help="Top N skills"),
+    csv_file: Optional[str] = typer.Option(None, "--csv", help="Exportar para CSV")
+):
+    resultado = obter_top10_skills(job, top=top)
+
+    if not resultado:
+        print("Não foi possível resolver o cargo (profession_role) ou não foram encontradas skills.")
         return
 
-    # --------------------------------------------------
-    # 4) Top 10 skills
-    # --------------------------------------------------
-    top10 = sorted(contagens.items(), key=lambda x: x[1], reverse=True)[:10]
-    resultado = [{"skill": s, "count": c} for s, c in top10]
-
-    print("\nTop skills encontradas:\n")
     print(json.dumps(resultado, indent=2, ensure_ascii=False))
 
-    # --------------------------------------------------
-    # 5) CSV opcional
-    # --------------------------------------------------
-    if csv_file:
-        with open(csv_file, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(["skill", "count"])
-            for s, c in top10:
-                writer.writerow([s, c])
-        print(f"\nCSV criado: {csv_file}")
 
 
 def mostrar_comandos():
     print("------------------------------------------------------------")
     print("Pode utilizar o programa com os seguintes comandos:\n")
+
     print(">  python jobscli.py top n")
     print("   - Mostra os n empregos mais recentes.\n")
+
     print('>  python jobscli.py search <Localidade> "<Empresa>" <n>')
     print("   - Lista n trabalhos part-time dessa empresa nessa localidade.\n")
+
     print(">  python jobscli.py type <job_id>")
     print("   - Mostra o regime de trabalho (remoto/híbrido/presencial/outro).\n")
+
     print(">  python jobscli.py skills <data_inicial (YYYY-MM-DD)> <data_final (YYYY-MM-DD)>")
     print("   - Conta ocorrências de skills nas descrições nesse intervalo.\n")
-    print(">  python jobscli.py statistics <Zona> [--csv ficheiro.csv]")
-    print("   - Conta vagas por zona e por tipo de trabalho.\n")
-    print(">  python jobscli.py get <job_id> [--csv ficheiro.csv]")
-    print("   - Mostra os detalhes do job enriquecidos com dados do Teamlyzer.")
-    print("   - Se indicar --csv, guarda também um ficheiro CSV com campos principais.\n")
-    print('>  python jobscli.py list-skills "<job>" [--csv ficheiro.csv]')
-    print("   - Mostra as top 10 skills pedidas no Teamlyzer para esse trabalho.\n")
- 
 
-if __name__ == "__main__":
+    print(">  python jobscli.py statistics <Zona> [--csv ficheiro.csv]")
+    print("   - Conta vagas por zona e por tipo de trabalho.")
+    
+
+    print(">  python jobscli.py get <job_id> [--csv ficheiro.csv]")
+    print("   - (TP2 a) Mostra os detalhes do job enriquecidos com dados do Teamlyzer.")
+    
+
+    print('>  python jobscli.py list-skills "<job>" [--top N] [--csv ficheiro.csv]')
+    print("   - (TP2 c) Mostra em JSON as top N skills para esse tipo de trabalho.")
+    
+
+
+
+
+if _name_ == "_main_":
     if len(sys.argv) == 1:
         mostrar_comandos()
     else:
