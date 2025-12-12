@@ -708,8 +708,6 @@ def mostrar_comandos():
     print("   - (TP2 d) Se indicar --csv, guarda também um CSV: job | skill | count.\n")
 
 
-
-
 if __name__ == "__main__":
     if len(sys.argv) == 1:
         mostrar_comandos()
