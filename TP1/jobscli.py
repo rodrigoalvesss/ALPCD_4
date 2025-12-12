@@ -493,6 +493,100 @@ def statistics(
 
     mostrar_comandos()
 
+from difflib import get_close_matches
+
+@app.command()
+def list_skills(job: str, csv_file: Optional[str] = typer.Option(None, "--csv")):
+    """
+    TP1 (c)+(d): Obtém as top skills pedidas para um cargo qualquer.
+    Funciona para qualquer texto: 'data scientist', 'backend engineer', etc.
+    """
+
+    print(f"A procurar skills para '{job}' ...")
+
+    # --------------------------------------------------
+    # 1) Recolher TODAS as tags reais do Teamlyzer
+    # --------------------------------------------------
+    base_url = "https://pt.teamlyzer.com/companies/jobs"
+
+    try:
+        resp = requests.get(base_url, headers=TEAMLYZER_HEADERS, timeout=10)
+        resp.raise_for_status()
+    except Exception as e:
+        print("Erro ao aceder ao Teamlyzer:", e)
+        return
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    all_tags = set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if "tags=" in href:
+            tag = href.split("tags=")[-1].split("&")[0].strip().lower()
+            all_tags.add(tag)
+
+    if not all_tags:
+        print("Não foi possível obter tags do Teamlyzer.")
+        return
+
+    # --------------------------------------------------
+    # 2) Fuzzy-match entre cargo e tags reais
+    # --------------------------------------------------
+    termo = job.lower().replace(" ", "-")
+    candidate_tags = get_close_matches(termo, list(all_tags), n=5, cutoff=0.3)
+
+    if not candidate_tags:
+        print("Nenhuma tag compatível encontrada para este cargo.")
+        return
+
+    print(f"Tags detetadas para '{job}': {candidate_tags}")
+
+    # --------------------------------------------------
+    # 3) Ir buscar vagas de cada tag relevante
+    # --------------------------------------------------
+    contagens = {}
+
+    for tag in candidate_tags:
+        url = f"https://pt.teamlyzer.com/companies/jobs?tags={tag}&order=most_relevant"
+
+        try:
+            resp2 = requests.get(url, headers=TEAMLYZER_HEADERS, timeout=10)
+            resp2.raise_for_status()
+        except:
+            continue
+
+        soup2 = BeautifulSoup(resp2.text, "html.parser")
+
+        # Skills de cada vaga (HTML direto)
+        tags_html = soup2.find_all("a", class_="job-tag")
+        for t in tags_html:
+            skill = t.get_text(strip=True).lower()
+            contagens[skill] = contagens.get(skill, 0) + 1
+
+    if not contagens:
+        print("Não foram encontradas skills para este cargo.")
+        return
+
+    # --------------------------------------------------
+    # 4) Top 10 skills
+    # --------------------------------------------------
+    top10 = sorted(contagens.items(), key=lambda x: x[1], reverse=True)[:10]
+    resultado = [{"skill": s, "count": c} for s, c in top10]
+
+    print("\nTop skills encontradas:\n")
+    print(json.dumps(resultado, indent=2, ensure_ascii=False))
+
+    # --------------------------------------------------
+    # 5) CSV opcional
+    # --------------------------------------------------
+    if csv_file:
+        with open(csv_file, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["skill", "count"])
+            for s, c in top10:
+                writer.writerow([s, c])
+        print(f"\nCSV criado: {csv_file}")
+
 
 def mostrar_comandos():
     print("------------------------------------------------------------")
@@ -510,7 +604,9 @@ def mostrar_comandos():
     print(">  python jobscli.py get <job_id> [--csv ficheiro.csv]")
     print("   - Mostra os detalhes do job enriquecidos com dados do Teamlyzer.")
     print("   - Se indicar --csv, guarda também um ficheiro CSV com campos principais.\n")
-
+    print('>  python jobscli.py list-skills "<job>" [--csv ficheiro.csv]')
+    print("   - Mostra as top 10 skills pedidas no Teamlyzer para esse trabalho.\n")
+ 
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
