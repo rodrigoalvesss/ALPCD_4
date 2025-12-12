@@ -10,9 +10,6 @@ from bs4 import BeautifulSoup
 from typing import Optional
 from urllib.parse import quote
 import unicodedata
-from collections import Counter
-
-
 
 app = typer.Typer()
 
@@ -132,7 +129,7 @@ def search(localidade: str, empresa: str, n: int):
     else:
         print(json.dumps(filtrados, indent=2, ensure_ascii=False))
         if typer.confirm("Deseja exportar para CSV?"):
-            nome = f"{empresa}{localidade}_parttime.csv".replace(" ", "")
+            nome = f"{empresa}_{localidade}_parttime.csv".replace(" ", "_")
             exportar_csv(filtrados, nome)
 
     mostrar_comandos()
@@ -252,16 +249,9 @@ def skills(data_inicial: str, data_final: str):
 
 ### TP2 ###
 
-#a)     Procura a empresa na página de ranking do Teamlyzer e devolve o URL da página da empresa (ou None).
+#a) Procura a empresa na página de ranking do Teamlyzer e devolve o URL da página da empresa (ou None).
 
 def encontrar_url_empresa_teamlyzer(nome_empresa: str, slug: Optional[str] = None) -> Optional[str]:
-    """
-    Tenta encontrar o URL da empresa no Teamlyzer.
-
-    1) Primeiro tenta construir diretamente a partir do slug do itjobs.pt:
-       https://pt.teamlyzer.com/companies/<slug>
-    2) Se não der, faz fallback para o ranking, procurando links de /companies/...
-    """
 
     # 1) Tentar com o slug, se existir
     if slug:
@@ -293,7 +283,6 @@ def encontrar_url_empresa_teamlyzer(nome_empresa: str, slug: Optional[str] = Non
 
         texto = link.get_text(" ", strip=True).lower()
 
-        # critério: ou o slug aparece no href, ou o nome aparece no texto
         if slug_norm and slug_norm in href.lower():
             return TEAMLYZER_BASE_URL + href
         if alvo and alvo in texto:
@@ -302,8 +291,6 @@ def encontrar_url_empresa_teamlyzer(nome_empresa: str, slug: Optional[str] = Non
     return None
 
 def extrair_info_empresa_teamlyzer(url_empresa: str) -> dict:
-
-#    Vai à página da empresa no Teamlyzer e tenta extrair: rating, descrição, benefícios e uma frase sobre salário.
 
     try:
         resp = requests.get(url_empresa, headers=TEAMLYZER_HEADERS, timeout=10)
@@ -394,7 +381,6 @@ def get(
         mostrar_comandos()
         return
 
-    # nome da empresa + slug (se existir)
     company = job.get("company")
     slug_empresa = None
 
@@ -412,14 +398,7 @@ def get(
         mostrar_comandos()
         return
 
-    # aqui já passamos também o slug para aumentar a probabilidade de encontrar a empresa
     url_empresa = encontrar_url_empresa_teamlyzer(nome_empresa, slug_empresa)
-    if not url_empresa:
-        print(f"Empresa '{nome_empresa}' não encontrada no Teamlyzer. JSON original do job:")
-        print(json.dumps(job, indent=2, ensure_ascii=False))
-        mostrar_comandos()
-        return
-
     if not url_empresa:
         print(f"Empresa '{nome_empresa}' não encontrada no Teamlyzer. JSON original do job:")
         print(json.dumps(job, indent=2, ensure_ascii=False))
@@ -465,14 +444,13 @@ def get(
     mostrar_comandos()
 
 
-#b)     Conta vagas por zona e por tipo de trabalho. Pode ainda exportar CSV: Zona | Tipo de Trabalho | Nº de vagas.
+#b) Conta vagas por zona e por tipo de trabalho. Pode ainda exportar CSV: Zona | Tipo de Trabalho | Nº de vagas.
 
 @app.command()
 def statistics(
     zone: str = typer.Argument(..., help="Zona/Região a analisar"),
     csv_file: Optional[str] = typer.Option(None, "--csv", help="Exportar para CSV")
 ):
-
     params = {"api_key": API_KEY, "limit": 200}
     try:
         resp = requests.get(API_LIST_URL, headers=headers, params=params, timeout=10)
@@ -483,36 +461,46 @@ def statistics(
         return
 
     resultados = resp.json().get("results", [])
-
     zona_norm = zone.lower()
 
     contagens = {}
 
     for job in resultados:
         titulo = job.get("title", "N/A")
-
         for loc in job.get("locations", []):
             nome_loc = loc.get("name", "").lower()
-
             if zona_norm in nome_loc:
                 chave = (loc.get("name", "N/A"), titulo)
                 contagens[chave] = contagens.get(chave, 0) + 1
 
+    if not contagens:
+        print("Não foram encontradas vagas para essa zona.")
+        mostrar_comandos()
+        return
+
     resultado = [
-        {"zona": zona, "tipo_trabalho": tipo, "vagas": count}
-        for (zona, tipo), count in contagens.items()
+        {"zona": z, "tipo_trabalho": tipo, "vagas": count}
+        for (z, tipo), count in contagens.items()
     ]
+    resultado.sort(key=lambda x: x["vagas"], reverse=True)
 
     print(json.dumps(resultado, indent=2, ensure_ascii=False))
 
+    if csv_file:
+        try:
+            with open(csv_file, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Zona", "Tipo de Trabalho", "Nº de vagas"])
+                for (z, tipo), count in contagens.items():
+                    writer.writerow([z, tipo, count])
+            print(f"CSV '{csv_file}' criado com sucesso!")
+        except Exception as e:
+            print("Erro ao criar CSV:", e)
 
     mostrar_comandos()
 
-#c
 
-# =============================
-# TP2 — ALÍNEA c) (corrigida)
-# =============================
+#c)
 
 def normalizar_texto(s: str) -> str:
     if not s:
@@ -539,6 +527,7 @@ def obter_html(url: str) -> str:
 
 
 def _extrair_options_do_select(soup: BeautifulSoup, keywords: list[str]) -> list[tuple[str, str]]:
+
     selects = []
     for sel in soup.find_all("select"):
         blob = " ".join([
@@ -561,6 +550,7 @@ def _extrair_options_do_select(soup: BeautifulSoup, keywords: list[str]) -> list
 
 
 def resolver_profession_role(job: str) -> Optional[str]:
+
     url = f"{TEAMLYZER_BASE_URL}/companies/jobs?order=most_relevant"
     html = obter_html(url)
     soup = BeautifulSoup(html, "html.parser")
@@ -592,7 +582,7 @@ def resolver_profession_role(job: str) -> Optional[str]:
         elif t_clean in alvo:
             score = 60
 
-        # extra: match por slug/value (muito útil)
+        # extra: match por slug/value
         if alvo.replace(" ", "-") in v:
             score = max(score, 90)
 
@@ -628,7 +618,6 @@ def obter_top10_skills(job: str, top: int = 10) -> list[dict]:
     contagens = {}
 
     for txt, val in tags:
-        # Esperamos texto do tipo "python (49)"
         m = re.search(r"\((\d+)\)", txt)
         if not m:
             continue
@@ -673,6 +662,21 @@ def list_skills(
 
     print(json.dumps(resultado, indent=2, ensure_ascii=False))
 
+    if csv_file:
+        try:
+            with open(csv_file, "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(["job", "skill", "count"])
+                for item in resultado:
+                    w.writerow([job, item["skill"], item["count"]])
+            print(f"CSV '{csv_file}' criado com sucesso!")
+        except Exception as e:
+            print(f"Erro ao criar CSV '{csv_file}': {e}")
+
+
+
+
+##################################################################################
 
 
 def mostrar_comandos():
@@ -693,20 +697,20 @@ def mostrar_comandos():
 
     print(">  python jobscli.py statistics <Zona> [--csv ficheiro.csv]")
     print("   - Conta vagas por zona e por tipo de trabalho.")
-    
+    print("   - Se indicar --csv, guarda um CSV: Zona | Tipo de Trabalho | Nº de vagas.\n")
 
     print(">  python jobscli.py get <job_id> [--csv ficheiro.csv]")
     print("   - (TP2 a) Mostra os detalhes do job enriquecidos com dados do Teamlyzer.")
-    
+    print("   - (TP2 d) Se indicar --csv, guarda um CSV com os campos principais.\n")
 
     print('>  python jobscli.py list-skills "<job>" [--top N] [--csv ficheiro.csv]')
     print("   - (TP2 c) Mostra em JSON as top N skills para esse tipo de trabalho.")
-    
+    print("   - (TP2 d) Se indicar --csv, guarda também um CSV: job | skill | count.\n")
 
 
 
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     if len(sys.argv) == 1:
         mostrar_comandos()
     else:
